@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from app.core.config import settings
 from app.routers import auth, accounts, transfers, transactions, services, mfa, ai, loans, settings
 from fastapi.middleware.cors import CORSMiddleware
+import os
+import uvicorn
 
 app = FastAPI(title="Bank Super App")
 
@@ -41,5 +43,5 @@ async def root():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="localhost", port=port)
+    port = int(os.environ.get("PORT", 8080))  # Railway даст PORT=8080
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port)
