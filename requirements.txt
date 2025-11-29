@@ -258,3 +258,4 @@ ydata-profiling==4.17.0
 ydata-sdk==3.0.12
 zict==3.0.0
 zopfli==0.4.0
+python-jose[cryptography]
