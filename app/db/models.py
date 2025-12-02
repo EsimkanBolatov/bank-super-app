@@ -98,3 +98,32 @@ class Favorite(Base):
     type = Column(String, nullable=False)      # "phone" или "card"
     color_start = Column(String, default="#4CAF50") # Для градиента
     color_end = Column(String, default="#2E7D32")
+
+class Deposit(Base):
+    """Модель вклада"""
+    __tablename__ = "deposits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)  # Сумма вклада
+    rate = Column(Numeric(5, 4), nullable=False)  # Процентная ставка (например, 0.16 = 16%)
+    term_months = Column(Integer, nullable=False)  # Срок в месяцах
+    type = Column(String, default="standard")  # standard, premium, vip
+    start_date = Column(DateTime(timezone=True), default=datetime.utcnow)
+    end_date = Column(DateTime(timezone=True), nullable=False)
+    is_active = Column(Boolean, default=True)
+
+
+class Insurance(Base):
+    """Модель страхования"""
+    __tablename__ = "insurances"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    insurance_type = Column(String, nullable=False)  # life, health, property, auto, travel
+    coverage_amount = Column(Numeric(12, 2), nullable=False)  # Сумма покрытия
+    monthly_cost = Column(Numeric(10, 2), nullable=False)  # Ежемесячная стоимость
+    term_months = Column(Integer, nullable=False)
+    start_date = Column(DateTime(timezone=True), default=datetime.utcnow)
+    end_date = Column(DateTime(timezone=True), nullable=False)
+    is_active = Column(Boolean, default=True)

@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from app.core.config import settings
-from app.routers import auth, accounts, transfers, transactions, services, mfa, ai, loans, settings
+from app.routers import auth, accounts, transfers, transactions, services, mfa, ai, loans, settings, deposits, insurance
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import uvicorn
@@ -24,6 +24,8 @@ app.include_router(mfa.router)
 app.include_router(ai.router)
 app.include_router(loans.router)
 app.include_router(settings.router)
+app.include_router(deposits.router)
+app.include_router(insurance.router)
 
 app.add_middleware(
     CORSMiddleware,
