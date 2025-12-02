@@ -4,6 +4,7 @@ from sqlalchemy.future import select
 from pydantic import BaseModel
 from decimal import Decimal
 from datetime import datetime
+from typing import Dict, Optional, Any
 
 from app.db.database import get_db
 from app.db.models import User, Account, Transaction, RoleEnum, CurrencyEnum
@@ -11,38 +12,49 @@ from app.dependencies import get_current_user
 
 router = APIRouter(prefix="/services", tags=["Services"])
 
-
 class PayServiceRequest(BaseModel):
     service_name: str
     amount: float
+    details: Optional[Dict[str, Any]] = None
 
-
-# Настройка: Куда уходят деньги
+# НАСТРОЙКА: Куда уходят деньги
 SERVICE_ACCOUNTS_MAP = {
-    "ITU Tuition": {"phone": "service_itu", "name": "ITU University", "card": "ITU_CORP_ACC"},
-    "Eco Tree": {"phone": "service_eco", "name": "Eco Fund KZ", "card": "ECO_FUND_ACC"},
-    "Digital Taraz": {"phone": "service_bus", "name": "Tulpar Transport", "card": "BUS_PARK_ACC"},
-    "Taksi": {"phone": "service_taxi", "name": "Taxi Aggregator", "card": "TAXI_CORP_ACC"},
+    # --- СТАНДАРТНЫЕ ПЛАТЕЖИ ---
+    "Мобильный": {"phone": "srv_mobile", "name": "Mobile Hub", "card": "MOB_001"},
+    "Коммуналка": {"phone": "srv_util", "name": "Utility Center", "card": "UTL_001"},
+    "Транспорт": {"phone": "srv_trans", "name": "City Transport", "card": "TRN_001"},
+    "Штрафы": {"phone": "srv_fines", "name": "Gov Fines", "card": "GOV_001"},
+    "Интернет и ТВ": {"phone": "srv_inet", "name": "Internet Providers", "card": "INET_ACC"},
+    "Образование": {"phone": "srv_edu", "name": "Education Hub", "card": "EDU_ACC"},
+    "Игры": {"phone": "srv_games", "name": "Game Stores", "card": "GAM_001"},
+    "Билеты": {"phone": "service_ticket", "name": "Ticketon", "card": "TICKET_ACC"},
+    "Покупки": {"phone": "service_shop", "name": "E-Commerce", "card": "SHOP_ACC"},
+    "Развлечения": {"phone": "service_fun", "name": "Entertainment", "card": "FUN_ACC"},
+    "Объявления": {"phone": "srv_ads", "name": "Ads Platform", "card": "ADS_001"},
+    "Красота": {"phone": "srv_beauty", "name": "Beauty Hub", "card": "BTY_001"},
+    "Финансы": {"phone": "srv_fin", "name": "Fin Services", "card": "FIN_001"},
+    
+    # --- УНИКАЛЬНЫЕ СЕРВИСЫ (SUPER APP) ---
+    "Eco Tree": {"phone": "srv_eco", "name": "Eco Fund KZ", "card": "ECO_001"},
+    "Ortak": {"phone": "srv_ortak", "name": "P2P Split System", "card": "ORTAK_001"},
+    
+    # Дефолт
+    "Другое": {"phone": "srv_other", "name": "Other Services", "card": "OTH_001"},
 }
 
-
 async def get_or_create_service_account(db: AsyncSession, service_name: str) -> Account:
-    """Находит или создает счет компании-получателя."""
-    info = SERVICE_ACCOUNTS_MAP.get(service_name,
-                                    {"phone": "service_misc", "name": "General Service", "card": "MISC_ACC"})
-
-    # 1. Ищем юзера-компанию
+    info = SERVICE_ACCOUNTS_MAP.get(service_name, SERVICE_ACCOUNTS_MAP["Другое"])
+    
     q = select(User).where(User.phone == info["phone"])
     res = await db.execute(q)
     user = res.scalars().first()
 
     if not user:
-        user = User(phone=info["phone"], password_hash="service_pass", full_name=info["name"], role=RoleEnum.USER)
+        user = User(phone=info["phone"], password_hash="pass", full_name=info["name"], role=RoleEnum.USER)
         db.add(user)
         await db.commit()
         await db.refresh(user)
 
-    # 2. Ищем счет компании
     q_acc = select(Account).where(Account.user_id == user.id)
     res_acc = await db.execute(q_acc)
     acc = res_acc.scalars().first()
@@ -55,48 +67,59 @@ async def get_or_create_service_account(db: AsyncSession, service_name: str) -> 
 
     return acc
 
-
 @router.post("/pay")
 async def pay_service(
         req: PayServiceRequest,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    # 1. Счет плательщика
     q = select(Account).where(Account.user_id == current_user.id, Account.is_blocked == False)
     res = await db.execute(q)
     user_acc = res.scalars().first()
 
     if not user_acc:
-        raise HTTPException(status_code=400, detail="Нет счета для оплаты")
+        raise HTTPException(status_code=400, detail="Нет активного счета")
 
     amount = Decimal(str(req.amount))
     if user_acc.balance < amount:
         raise HTTPException(status_code=400, detail="Недостаточно средств")
 
-    # 2. Счет получателя (Сервиса)
     service_acc = await get_or_create_service_account(db, req.service_name)
 
+    # Формирование описания транзакции
+    desc = f"Оплата: {req.service_name}"
+    dt = req.details or {}
+
+    if req.service_name == "Мобильный":
+        desc = f"Моб: {dt.get('operator', '').upper()} {dt.get('phone', '')}"
+    elif req.service_name == "Коммуналка":
+        desc = f"ЖКХ: {dt.get('service', '').upper()} ({dt.get('account', '')})"
+    elif req.service_name == "Транспорт":
+        desc = f"Транспорт: {dt.get('city', '')} ({dt.get('card', '')})"
+    elif req.service_name == "Штрафы":
+        desc = f"Штраф: {dt.get('type', '')} {dt.get('value', '')}"
+    elif req.service_name == "Eco Tree":
+        desc = "Вклад в экологию 🌳"
+    elif req.service_name == "Ortak":
+        desc = "Возврат долга (Split) 🍕"
+
     try:
-        # Перевод
         user_acc.balance -= amount
         service_acc.balance += amount
 
-        # История
         tx = Transaction(
             from_account_id=user_acc.id,
-            to_account_id=service_acc.id,  # ID счета сервиса!
+            to_account_id=service_acc.id,
             amount=amount,
-            category=f"Service: {req.service_name}",
+            category=desc,
             created_at=datetime.utcnow()
         )
         db.add(tx)
         await db.commit()
-        await db.refresh(tx)
-
-        return {"status": "success", "message": f"Оплачено: {req.service_name}", "new_balance": float(user_acc.balance)}
+        
+        return {"status": "success", "message": desc, "new_balance": float(user_acc.balance)}
 
     except Exception as e:
         await db.rollback()
-        print(f"Service Error: {e}")
-        raise HTTPException(status_code=500, detail="Ошибка проведения платежа")
+        print(e)
+        raise HTTPException(status_code=500, detail="Ошибка платежа")
