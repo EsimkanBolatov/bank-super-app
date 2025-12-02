@@ -17,40 +17,17 @@ class PayServiceRequest(BaseModel):
     amount: float
     details: Optional[Dict[str, Any]] = None
 
-# НАСТРОЙКА: Куда уходят деньги
-SERVICE_ACCOUNTS_MAP = {
-    # --- СТАНДАРТНЫЕ ПЛАТЕЖИ ---
-    "Мобильный": {"phone": "srv_mobile", "name": "Mobile Hub", "card": "MOB_001"},
-    "Коммуналка": {"phone": "srv_util", "name": "Utility Center", "card": "UTL_001"},
-    "Транспорт": {"phone": "srv_trans", "name": "City Transport", "card": "TRN_001"},
-    "Штрафы": {"phone": "srv_fines", "name": "Gov Fines", "card": "GOV_001"},
-    "Интернет и ТВ": {"phone": "srv_inet", "name": "Internet Providers", "card": "INET_ACC"},
-    "Образование": {"phone": "srv_edu", "name": "Education Hub", "card": "EDU_ACC"},
-    "Игры": {"phone": "srv_games", "name": "Game Stores", "card": "GAM_001"},
-    "Билеты": {"phone": "service_ticket", "name": "Ticketon", "card": "TICKET_ACC"},
-    "Покупки": {"phone": "service_shop", "name": "E-Commerce", "card": "SHOP_ACC"},
-    "Развлечения": {"phone": "service_fun", "name": "Entertainment", "card": "FUN_ACC"},
-    "Объявления": {"phone": "srv_ads", "name": "Ads Platform", "card": "ADS_001"},
-    "Красота": {"phone": "srv_beauty", "name": "Beauty Hub", "card": "BTY_001"},
-    "Финансы": {"phone": "srv_fin", "name": "Fin Services", "card": "FIN_001"},
-    
-    # --- УНИКАЛЬНЫЕ СЕРВИСЫ (SUPER APP) ---
-    "Eco Tree": {"phone": "srv_eco", "name": "Eco Fund KZ", "card": "ECO_001"},
-    "Ortak": {"phone": "srv_ortak", "name": "P2P Split System", "card": "ORTAK_001"},
-    
-    # Дефолт
-    "Другое": {"phone": "srv_other", "name": "Other Services", "card": "OTH_001"},
-}
-
 async def get_or_create_service_account(db: AsyncSession, service_name: str) -> Account:
-    info = SERVICE_ACCOUNTS_MAP.get(service_name, SERVICE_ACCOUNTS_MAP["Другое"])
+    # Для упрощения все деньги уходят на один "технический" аккаунт сервисов
+    # В реальности тут была бы сложная логика маршрутизации
+    service_phone = "srv_general"
     
-    q = select(User).where(User.phone == info["phone"])
+    q = select(User).where(User.phone == service_phone)
     res = await db.execute(q)
     user = res.scalars().first()
 
     if not user:
-        user = User(phone=info["phone"], password_hash="pass", full_name=info["name"], role=RoleEnum.USER)
+        user = User(phone=service_phone, password_hash="pass", full_name="Service Hub", role=RoleEnum.USER)
         db.add(user)
         await db.commit()
         await db.refresh(user)
@@ -60,7 +37,7 @@ async def get_or_create_service_account(db: AsyncSession, service_name: str) -> 
     acc = res_acc.scalars().first()
 
     if not acc:
-        acc = Account(user_id=user.id, card_number=info["card"], balance=0, currency=CurrencyEnum.KZT)
+        acc = Account(user_id=user.id, card_number="SRV_000_000", balance=0, currency=CurrencyEnum.KZT)
         db.add(acc)
         await db.commit()
         await db.refresh(acc)
@@ -86,22 +63,53 @@ async def pay_service(
 
     service_acc = await get_or_create_service_account(db, req.service_name)
 
-    # Формирование описания транзакции
+    # --- ФОРМИРОВАНИЕ КРАСИВОГО ОПИСАНИЯ ---
     desc = f"Оплата: {req.service_name}"
     dt = req.details or {}
-
+ 
     if req.service_name == "Мобильный":
-        desc = f"Моб: {dt.get('operator', '').upper()} {dt.get('phone', '')}"
+        desc = f"Моб: {dt.get('operator', '').upper()} ({dt.get('phone', '')})"
+    
     elif req.service_name == "Коммуналка":
-        desc = f"ЖКХ: {dt.get('service', '').upper()} ({dt.get('account', '')})"
+        desc = f"ЖКХ: {dt.get('service_type', '').upper()} ({dt.get('account_id', '')})"
+        
     elif req.service_name == "Транспорт":
-        desc = f"Транспорт: {dt.get('city', '')} ({dt.get('card', '')})"
+        desc = f"Транспорт: {dt.get('city', '').upper()} ({dt.get('card_number', '')})"
+        
+    elif req.service_name == "Интернет и ТВ":
+        provider = dt.get('provider', '').replace('_', ' ').title()
+        desc = f"Интернет: {provider} ({dt.get('account_id', '')})"
+        
+    elif req.service_name == "Образование":
+        uni = dt.get('university', '').upper()
+        desc = f"Обучение: {uni} (ID: {dt.get('student_id', '')})"
+        
+    elif req.service_name == "Билеты":
+        srv = dt.get('ticket_service', '').replace('_', ' ').title()
+        desc = f"Билеты: {srv} (Заказ: {dt.get('order_id', '')})"
+        
+    elif req.service_name == "Покупки":
+        shop = dt.get('shop', '').title()
+        desc = f"Shop: {shop} (Заказ: {dt.get('order_id', '')})"
+        
+    elif req.service_name == "Развлечения":
+        srv = dt.get('service', '').replace('_', ' ').title()
+        desc = f"Подписка: {srv} ({dt.get('username', '')})"
+        
     elif req.service_name == "Штрафы":
-        desc = f"Штраф: {dt.get('type', '')} {dt.get('value', '')}"
+        search_type = "ИИН" if dt.get('search_type') == 'iin' else "Госномер"
+        desc = f"Штраф ({search_type}): {dt.get('search_value', '')}"
+        
+    elif req.service_name == "Другое":
+        cat = dt.get('category', 'Прочее')
+        text = dt.get('description', '')
+        desc = f"{cat}: {text}"
+        
     elif req.service_name == "Eco Tree":
         desc = "Вклад в экологию 🌳"
+        
     elif req.service_name == "Ortak":
-        desc = "Возврат долга (Split) 🍕"
+        desc = "Ortak: Разделение счета 🍕"
 
     try:
         user_acc.balance -= amount
@@ -121,5 +129,5 @@ async def pay_service(
 
     except Exception as e:
         await db.rollback()
-        print(e)
-        raise HTTPException(status_code=500, detail="Ошибка платежа")
+        print(f"Payment Error: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка при проведении платежа")
