@@ -49,17 +49,28 @@ class Account(Base):
                                          back_populates="to_account")
 
 
-class Transaction(Base):
-    __tablename__ = "transactions"
+class Loan(Base):  # <--- ТУТ БЫЛА ОШИБКА, НУЖНО Base
+    __tablename__ = "loans"
 
     id = Column(Integer, primary_key=True, index=True)
-
-    from_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
-    to_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
-
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     amount = Column(Numeric(10, 2), nullable=False)
-    category = Column(String, default="Transfer")
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, server_default=func.now())
+    term_months = Column(Integer, nullable=False)
+    monthly_payment = Column(Numeric(10, 2), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    type = Column(String, default="credit") # "credit" или "red"
 
-    from_account = relationship("Account", foreign_keys=[from_account_id], back_populates="outgoing_transactions")
-    to_account = relationship("Account", foreign_keys=[to_account_id], back_populates="incoming_transactions")
+    schedule = relationship("LoanSchedule", back_populates="loan")
+
+
+class LoanSchedule(Base):  # <--- И ТУТ ТОЖЕ Base
+    __tablename__ = "loan_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    loan_id = Column(Integer, ForeignKey("loans.id"), nullable=False)
+    due_date = Column(DateTime(timezone=True), nullable=False) # Когда платить
+    amount = Column(Numeric(10, 2), nullable=False)
+    is_paid = Column(Boolean, default=False)
+
+    loan = relationship("Loan", back_populates="schedule")
